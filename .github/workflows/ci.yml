@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Mirrors docker-compose.yml: HelpdeskApiFactory hard-codes Server=localhost,14330 and this sa password.
+      sql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Workshop!Passw0rd"
+        ports:
+          - 14330:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Workshop!Passw0rd' -C -b -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 20s
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore (locked mode)
+        run: dotnet restore Helpdesk.slnx --locked-mode
+
+      - name: Build (warnings as errors)
+        run: dotnet build Helpdesk.slnx --no-restore --configuration Release -warnaserror
+
+      - name: Test - Domain (Helpdesk.Tickets.Domain.Tests)
+        run: dotnet test tests/Helpdesk.Tickets.Domain.Tests/Helpdesk.Tickets.Domain.Tests.csproj --no-build --configuration Release
+
+      - name: Test - Architecture (Helpdesk.ArchitectureTests)
+        run: dotnet test tests/Helpdesk.ArchitectureTests/Helpdesk.ArchitectureTests.csproj --no-build --configuration Release
+
+      - name: Test - API (Helpdesk.ApiTests, SQL Server)
+        run: dotnet test tests/Helpdesk.ApiTests/Helpdesk.ApiTests.csproj --no-build --configuration Release
